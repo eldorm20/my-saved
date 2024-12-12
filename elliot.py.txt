@@ -1,0 +1,124 @@
+import RPi.GPIO as GPIO
+import speech_recognition as sr
+import pyttsx3
+import requests
+import schedule
+import time
+import datetime
+import tkinter as tk
+from tkinter import ttk
+
+# GPIO setup
+GPIO.setmode(GPIO.BCM)
+DEVICES = {"light": 18, "fan": 23}
+for device, pin in DEVICES.items():
+    GPIO.setup(pin, GPIO.OUT)
+
+# Initialize text-to-speech
+engine = pyttsx3.init()
+
+def speak(message):
+    """Convert text to speech."""
+    engine.say(message)
+    engine.runAndWait()
+
+def listen():
+    """Listen for voice commands."""
+    recognizer = sr.Recognizer()
+    with sr.Microphone() as source:
+        speak("I'm listening...")
+        try:
+            audio = recognizer.listen(source, timeout=5)
+            command = recognizer.recognize_google(audio).lower()
+            print(f"You said: {command}")
+            return command
+        except sr.UnknownValueError:
+            speak("Sorry, I didn't catch that.")
+            return None
+        except sr.RequestError as e:
+            speak(f"Error: {e}")
+            return None
+
+def control_device(command):
+    """Control devices based on the command."""
+    for device in DEVICES:
+        if device in command:
+            if "on" in command:
+                GPIO.output(DEVICES[device], GPIO.HIGH)
+                speak(f"{device.capitalize()} is now ON.")
+            elif "off" in command:
+                GPIO.output(DEVICES[device], GPIO.LOW)
+                speak(f"{device.capitalize()} is now OFF.")
+
+def get_weather():
+    """Fetch current weather information."""
+    API_KEY = "your_openweather_api_key"
+    CITY = "Tashkent"
+    url = f"http://api.openweathermap.org/data/2.5/weather?q={CITY}&appid={API_KEY}&units=metric"
+    response = requests.get(url)
+    if response.status_code == 200:
+        data = response.json()
+        temp = data["main"]["temp"]
+        description = data["weather"][0]["description"]
+        speak(f"The temperature in {CITY} is {temp} degrees Celsius with {description}.")
+    else:
+        speak("Unable to fetch weather data.")
+
+def handle_command(command):
+    """Process and execute commands."""
+    if "light" in command or "fan" in command:
+        control_device(command)
+    elif "weather" in command:
+        get_weather()
+    elif "time" in command:
+        now = datetime.datetime.now()
+        speak(f"The current time is {now.strftime('%H:%M:%S')}.")
+    elif "date" in command:
+        today = datetime.datetime.now()
+        speak(f"Today is {today.strftime('%A, %B %d, %Y')}.")
+    elif "exit" in command:
+        speak("Goodbye!")
+        GPIO.cleanup()
+        exit()
+
+# Task scheduling
+def scheduled_tasks():
+    speak("Starting scheduled tasks.")
+    GPIO.output(DEVICES["light"], GPIO.HIGH)
+
+schedule.every().day.at("07:00").do(scheduled_tasks)
+
+def run_schedule():
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
+# GUI setup
+def execute_command():
+    command = entry.get()
+    if command:
+        handle_command(command.lower())
+
+root = tk.Tk()
+root.title("Jarvis Home Automation")
+
+entry = tk.Entry(root, width=30)
+entry.pack()
+
+btn_execute = tk.Button(root, text="Execute", command=execute_command)
+btn_execute.pack()
+
+# Main loop for voice interaction
+def voice_loop():
+    while True:
+        command = listen()
+        if command:
+            handle_command(command)
+
+# Multithreading for voice and GUI
+import threading
+
+threading.Thread(target=run_schedule, daemon=True).start()
+threading.Thread(target=voice_loop, daemon=True).start()
+
+root.mainloop()
